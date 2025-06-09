@@ -11,11 +11,6 @@ library(seqminer)
 library(friendly2MR)
 library(xlsx)
 
-rm(list=ls())
-setwd("D:/yanwork/IIT-I-231222663-MR")
-load("D:/yanwork/IIT-I-231222663-MR/result/Hypertrophic scar.Rdata")
-load("D:/yanwork/IIT-I-231222663-MR/Exposure inflammatory cytokines.RData")
-
 ###############1、读取暴露和结局数据###############
 
 exp_CTACK <- extract_instruments(outcomes = "ebi-a-GCST004420",p1=5e-06)
@@ -99,7 +94,6 @@ exp_TNFb$exposure<-"TNFb"
 exp_TRAIL<- extract_instruments(outcomes = "ebi-a-GCST004424",p1=5e-08)
 exp_TRAIL$exposure<-"TRAIL"
 
-
 exp_data<-rbind(exp_CTACK,exp_Eotaxin,exp_GROa,exp_IP10,exp_MCP1,exp_MCP3,exp_MIG,exp_MIP1a,exp_MIP1b,exp_RANTES,
                 exp_Bngf,exp_FGFBasic,exp_GCSF,exp_HGF,exp_MCSF,exp_PDGFbb,exp_SCF,exp_SCGFb,exp_VEGF,exp_IL10,
                 exp_IL12p70,exp_IL13,exp_IL16,exp_IL17,exp_IL18,exp_IL1b,exp_IL1ra,exp_IL2,exp_IL2ra,exp_IL4,exp_IL5,
@@ -110,152 +104,10 @@ colnames(exp_data)
 #[6] "se.exposure"            "id.exposure"            "SNP"                    "effect_allele.exposure" "other_allele.exposure" 
 #[11] "eaf.exposure"           "exposure"               "mr_keep.exposure"       "pval_origin.exposure"   "data_source.exposure"
 
-snp_add_eaf <- function(dat, build = "37", pop = "EUR")
-{
-  stopifnot(build %in% c("37","38"))
-  stopifnot("SNP" %in% names(dat))
-  
-  # Create and get a url
-  server <- ifelse(build == "37","http://grch37.rest.ensembl.org","http://rest.ensembl.org")
-  pop <- paste0("1000GENOMES:phase_3:",pop)
-  
-  snp_reverse_base <- function(x)
-  {
-    x <- stringr::str_to_upper(x)
-    stopifnot(x %in% c("A","T","C","G"))
-    switch(x,"A"="T","T"="A","C"="G","G"="C")
-  }
-  
-  res_tab <- lapply(1:nrow(dat), function(i)
-  {
-    print(paste0("seaching for No.", i, " SNP"))
-    dat_i <- dat[i,]
-    
-    ext <- paste0("/variation/Homo_sapiens/",dat_i$SNP, "?content-type=application/json;pops=1")
-    url <- paste(server, ext, sep = "")
-    res <- httr::GET(url)
-    
-    # Converts http errors to R errors or warnings
-    httr::stop_for_status(res)
-    
-    # Convert R objects from JSON
-    res <- httr::content(res)
-    res_pop <- jsonlite::fromJSON(jsonlite::toJSON(res))$populations
-    
-    # Filter query results based on population set
-    res_pop <- try(res_pop[res_pop$population == pop,])
-    if("try-error" %in% class(res_pop))
-    {
-      print(paste0("There is not information for population ",pop))
-      queried_effect_allele <- "NR"
-      queried_other_allele <- "NR"
-      queried_eaf <- -1
-    }
-    else
-    {
-      if(nrow(res_pop)==0)
-      {
-        print(paste0("There is not information for population ",pop))
-        queried_effect_allele <- "NR"
-        queried_other_allele <- "NR"
-        queried_eaf <- -1
-      }
-      else
-      {
-        queried_effect_allele <- res_pop[1,"allele"][[1]]
-        queried_other_allele <- res_pop[2,"allele"][[1]]
-        queried_eaf <- res_pop[1,"frequency"][[1]]    
-      }
-    }
-    
-    effect_allele <- ifelse("effect_allele.exposure" %in% names(dat),
-                            dat_i$effect_allele.exposure,
-                            dat_i$effect_allele)
-    
-    other_allele <- ifelse("effect_allele.exposure" %in% names(dat),
-                           dat_i$other_allele.exposure,
-                           dat_i$other_allele)
-    
-    if("effect_allele.exposure" %in% names(dat))
-    {
-      name_output <- unique(c(names(dat), "eaf.exposure","reliability.exposure"))
-    }
-    else
-    {
-      name_output <- unique(c(names(dat), "eaf","reliability.exposure"))
-    }
-    
-    len_effect_allele <- nchar(effect_allele)
-    len_other_allele <- nchar(other_allele)
-    
-    if(len_effect_allele==1&len_other_allele==1)
-    {
-      if((queried_effect_allele==effect_allele & queried_other_allele==other_allele)|
-         (queried_effect_allele==other_allele & queried_other_allele==effect_allele))
-      {
-        dat_i$eaf.exposure <- ifelse(effect_allele == queried_effect_allele,
-                                     queried_eaf,
-                                     1-queried_eaf)
-        dat_i$eaf <- dat_i$eaf.exposure 
-        dat_i$reliability.exposure <- "high"
-      }
-      else
-      {
-        r_queried_effect_allele <- snp_reverse_base(queried_effect_allele)
-        r_queried_other_allele <- snp_reverse_base(queried_other_allele)
-        if((r_queried_effect_allele==effect_allele & r_queried_other_allele==other_allele)|
-           (r_queried_effect_allele==other_allele & r_queried_other_allele==effect_allele))
-        {
-          dat_i$eaf.exposure <- ifelse(effect_allele == r_queried_effect_allele,
-                                       queried_eaf,
-                                       1-queried_eaf)
-          dat_i$eaf <- dat_i$eaf.exposure 
-          dat_i$reliability.exposure <- "high"
-        }
-        else
-        {
-          dat_i$eaf.exposure <- ifelse(effect_allele == queried_effect_allele,
-                                       queried_eaf,
-                                       1-queried_eaf)
-          dat_i$eaf <- dat_i$eaf.exposure 
-          dat_i$reliability.exposure <- "low"
-        }
-      }
-    }
-    
-    else
-    {
-      # To identify the potential DEL/ INS
-      short_allele <- ifelse(len_effect_allele==1,
-                             effect_allele,
-                             other_allele)
-      short_allele_eaf <- ifelse(short_allele == queried_effect_allele, 
-                                 queried_eaf, 
-                                 1-queried_eaf)
-      dat_i$eaf.exposure <- ifelse(effect_allele == short_allele,
-                                   short_allele_eaf,
-                                   1-short_allele_eaf)
-      dat_i$eaf <- dat_i$eaf.exposure 
-      dat_i$reliability.exposure <- "low"
-    }
-    
-    dat_i[name_output]
-  })
-  
-  return(do.call(rbind, res_tab))
-}
-nrow(exp_data)
-exp_data<-snp_add_eaf(exp_data)
-exp_data[1:187,]<-snp_add_eaf(exp_data[1:187,])
-exp_data[189:399,]<-snp_add_eaf(exp_data[189:399,])
-exp_data[188,]$eaf.exposure<-0.05
-
 exp_data1<-exp_data[,c("SNP","exposure","pval.exposure","chr.exposure","pos.exposure",
                        "effect_allele.exposure","other_allele.exposure","eaf.exposure","beta.exposure",
                        "se.exposure","samplesize.exposure")]
-write.xlsx(exp_data1, file = "D:/yanwork/IIT-I-231222663-MR/data/IV_ALL.xlsx", row.names = F)
 
-table(exp_data$exposure)
 #################结局###################
 out_Hypertrophic <- extract_outcome_data(snps = exp_data$SNP, outcomes = "finn-b-L12_HYPETROPHICSCAR")
 out_Hypertrophic$outcome<-"Hypertrophic scar"
@@ -280,37 +132,6 @@ quantile(exp_data$F)
 # 3、harmonise----
 nrow(exp_data)
 har_Hypertrophic <- harmonise_data(exposure_dat = exp_data, outcome_dat = out_Hypertrophic)
-
-har_Hypertrophic2<-har_Hypertrophic[har_Hypertrophic$mr_keep==TRUE,c("SNP",	"chr","pos.exposure","effect_allele.exposure","other_allele.exposure",
-                                                   "eaf.exposure","exposure","beta.exposure","se.exposure","pval.exposure","r2","F","outcome","beta.outcome","se.outcome",
-                                                   "pval.outcome")]
-colnames(har_Hypertrophic2)<-c("SNP","Chr","Pos","EA","OA","EAF","exp","beta","se","pval","r2","F","outcome","beta1","se1","pval1")
-
-write.csv(har_Hypertrophic2, file = "D:/yanwork/IIT-I-231222663-MR/result/IV_out_Hypertrophic.csv", row.names = F)
-
-find_exp<-function(exposure,singleexp,singloutcome,harmonise){
-  a<-list()
-  a$`SNP summary`<-cbind(sprintf("%.0f",nrow(exposure[exposure$exposure==singleexp,])),sprintf("%.2f",mean(exposure[exposure$exposure==singleexp,]$F)),
-                         sprintf("%.2f",min(exposure[exposure$exposure==singleexp,]$F)),sprintf("%.2f",max(exposure[exposure$exposure==singleexp,]$F)))
-  colnames(a$`SNP summary`)<-c("The number of all SNP","Mean F","Mini F","Max F")
-  a$`The number of all unmatched SNP`<-length(exposure[exposure$exposure==singleexp,][!(exposure[exposure$exposure==singleexp,"SNP"] %in%
-                                                                                          harmonise[harmonise$exposure==singleexp&harmonise$outcome==singloutcome,"SNP"]),"SNP"])+
-    nrow(harmonise[!is.na(harmonise$`proxy.outcome`)&harmonise$exposure==singleexp&harmonise$outcome==singloutcome,])
-  a$`All unmatched SNP`<-c(unlist(exposure[exposure$exposure==singleexp,][!(exposure[exposure$exposure==singleexp,"SNP"] %in%harmonise[harmonise$exposure==singleexp&harmonise$outcome==singloutcome,"SNP"]),"SNP"]),
-                           unlist(harmonise[!is.na(harmonise$`proxy.outcome`)&harmonise$exposure==singleexp&harmonise$outcome==singloutcome,"SNP"]))
-  a$`SNP not found in summary`<-exposure[exposure$exposure==singleexp,][!(exposure[exposure$exposure==singleexp,"SNP"] %in%harmonise[harmonise$exposure==singleexp&harmonise$outcome==singloutcome,"SNP"]),"SNP"]
-  a$`Proxy SNP`<-cbind(harmonise[!is.na(harmonise$`proxy.outcome`)&harmonise$exposure==singleexp&harmonise$outcome==singloutcome,"target_snp.outcome"],
-                       harmonise[!is.na(harmonise$`proxy.outcome`)&harmonise$exposure==singleexp&harmonise$outcome==singloutcome,"proxy_snp.outcome"],
-                       round(harmonise[!is.na(harmonise$`proxy.outcome`)&harmonise$exposure==singleexp&harmonise$outcome==singloutcome,"r2"],8))
-  colnames(a$`Proxy SNP`)<-c("target_snp.outcome","proxy_snp.outcome","r2")
-  a$`The number of proxy SNP`<-nrow(harmonise[!is.na(harmonise$`proxy.outcome`)&harmonise$exposure==singleexp&harmonise$outcome==singloutcome,])
-  a$`MR keep FALSE`<-harmonise[harmonise$exposure==singleexp&harmonise$outcome==singloutcome&harmonise$mr_keep==FALSE,"SNP"]
-  return(a)
-}
-
-
-table(exp_data$exposure)
-find_exp(exp_data,"TRAIL","Hypertrophic scar",har_Hypertrophic)
 
 # 4、MR分析----
 mr_method_list()
@@ -344,13 +165,10 @@ res_hetergeneity <- mr_heterogeneity(dat = har_Hypertrophic,
                                      method_list=c("mr_egger_regression",'mr_ivw_mre'))
 res_hetergeneity[res_hetergeneity$method=="Inverse variance weighted (multiplicative random effects)","FDR adjusted P"]<-
   sprintf("%.2f",p.adjust(res_hetergeneity[res_hetergeneity$method=="Inverse variance weighted (multiplicative random effects)","Q_pval"],method = "BH"))
-res_hetergeneity
 
-write.xlsx(res_hetergeneity, file = "D:/yanwork/IIT-I-231222663-MR/result/hetergeneity.xlsx", row.names = F)
 # 6、水平多效性分析----
 res_pleiotropy <- mr_pleiotropy_test(dat = har_Hypertrophic)
 res_pleiotropy$`FDR adjusted P`<-sprintf("%.2f",p.adjust(res_pleiotropy[,"pval"],method = "BH"))
-write.xlsx(res_pleiotropy, file = "D:/yanwork/IIT-I-231222663-MR/result/pleiotropy.xlsx", row.names = F)
 
 presso<-TwoSampleMR::run_mr_presso(har_Hypertrophic)
 presso1<-function(presso,i){
@@ -395,12 +213,8 @@ presso_all<-presso1(presso,40,c("MCP1","IL-18","IL-10","IFNg","IL-4","IL-1ra","I
                                 "MIP1b","SCF","MIF","CTACK/CCL27","GCSF","IL-16","MCSF","IL-8","IL-17","IL-5",
                                 "FGFBasic","SCGFb","IL-7","IL-13","IL-9","IL-2","TRAIL","IL-1b","Bngf"))
 
-write.xlsx(presso_all$P, file = "D:/yanwork/IIT-I-231222663-MR/result/presso.xlsx",row.names = FALSE)
 
-presso[23]
-
-# 、harmonise----remove outlier
-nrow(exp_data)
+# remove outlier
 exp_data[exp_data$exposure=="SCF","SNP"][2]
 exp_data[exp_data$SNP=="rs13412535",]
 har_Hypertrophic[har_Hypertrophic$SNP=="rs13412535",]
@@ -412,21 +226,21 @@ res_or_remove <- generate_odds_ratios(mr_res = res_remove)
 res_or_remove$`OR (95% CI)`<-paste0(sprintf("%.3f",res_or_remove$or)," (",sprintf("%.3f",res_or_remove$or_lci95)," - ",sprintf("%.3f",res_or_remove$or_uci95),")")
 res_or_remove$P<-sprintf("%.3f",res_or_remove$pval)
 res_or_remove$`FDR adjusted P`<-sprintf("%.3f",p.adjust(res_or_remove[,"pval"],method = "BH"))
-write.xlsx(res_or_remove, file = "D:/yanwork/IIT-I-231222663-MR/result/OR_Hypertrophic scar_remove outlier.xlsx", row.names = F)
 
 p_scatter_remove <- mr_scatter_plot(mr_results = res_or_remove, dat = har_Hypertrophic[-231,])
 for (i in c(1:40)){
-  jpeg(filename = paste0("D:/yanwork/IIT-I-231222663-MR/result/Figure1_",
+  jpeg(filename = paste0("Figure1_",
                          plot_name[i],"_scatter remove outlier.jpeg"),units = "in",width = 10,height = 7,res = 600)
   print(p_scatter_remove[i])
   dev.off()
 }
+
 # 7、单个SNP效应分析----
 res_single <- mr_singlesnp(dat = har_Hypertrophic[-231,])
 ## Forest plot
 p_forest <- mr_forest_plot(singlesnp_results = res_single)
 for (i in c(1:40)){
-  jpeg(filename = paste0("D:/yanwork/IIT-I-231222663-MR/result/Figure2_",plot_name[i],"_Forest.jpeg"),
+  jpeg(filename = paste0("Figure2_",plot_name[i],"_Forest.jpeg"),
        units = "in",width = 10,height = 7,res = 600)
   print(p_forest[i])
   dev.off()
@@ -435,7 +249,7 @@ for (i in c(1:40)){
 ## Funnel plot
 p_funnel <- mr_funnel_plot(singlesnp_results = res_single)
 for (i in c(1:40)){
-  jpeg(filename = paste0("D:/yanwork/IIT-I-231222663-MR/result/Figure3_",plot_name[i],"_funnel.jpeg"),
+  jpeg(filename = paste0("Figure3_",plot_name[i],"_funnel.jpeg"),
        units = "in",width = 10,height = 7,res = 600)
   print(p_funnel[i])
   dev.off()
@@ -446,10 +260,8 @@ res_loo <- mr_leaveoneout(dat = har_Hypertrophic[-231,])
 p_loo <- mr_leaveoneout_plot(leaveoneout_results = res_loo)
 
 for (i in c(1:40)){
-  jpeg(filename = paste0("D:/yanwork/IIT-I-231222663-MR/result/Figure4_",plot_name[i],"_leaveoneout.jpeg"),
+  jpeg(filename = paste0("Figure4_",plot_name[i],"_leaveoneout.jpeg"),
        units = "in",width = 10,height = 7,res = 600)
   print(p_loo[i])
   dev.off()
 }
-
-save.image(file ="D:/yanwork/IIT-I-231222663-MR/result/Hypertrophic scar.Rdata")
